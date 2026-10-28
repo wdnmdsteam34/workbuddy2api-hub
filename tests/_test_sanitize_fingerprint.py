@@ -209,6 +209,67 @@ class DshGuiParagraphTests(unittest.TestCase):
         self.assertIn("whose URL is named in the runtime context", system)
 
 
+class DshFileReferenceParagraphTests(unittest.TestCase):
+    """DSH file-reference prompt channel fingerprint (#683)."""
+
+    A = "Tokens prefixed with @ are paths the user explicitly referenced."
+    A_REWORDED = "Tokens prefixed with @ are paths that the user explicitly referenced."
+    B = ("Relative paths resolve from the workspace root; absolute paths identify "
+         "files or directories on the host.")
+    FILE_REFERENCE = A + " " + B
+
+    def test_file_reference_paragraph_in_system_rewritten(self):
+        out = P.sanitize_messages([{"role": "system", "content": self.FILE_REFERENCE}])
+        self.assertEqual(out[0]["content"], self.A_REWORDED + " " + self.B)
+
+    def test_file_reference_paragraph_in_developer_rewritten(self):
+        out = P.sanitize_messages([{"role": "developer", "content": self.FILE_REFERENCE}])
+        self.assertEqual(out[0]["content"], self.A_REWORDED + " " + self.B)
+
+    def test_file_reference_paragraph_in_assistant_rewritten(self):
+        out = P.sanitize_messages([{"role": "assistant", "content": self.FILE_REFERENCE}])
+        self.assertEqual(out[0]["content"], self.A_REWORDED + " " + self.B)
+
+    def test_user_and_tool_untouched(self):
+        out = P.sanitize_messages([
+            {"role": "user", "content": self.FILE_REFERENCE},
+            {"role": "tool", "content": self.FILE_REFERENCE},
+        ])
+        self.assertEqual(out[0]["content"], self.FILE_REFERENCE)
+        self.assertEqual(out[1]["content"], self.FILE_REFERENCE)
+
+    def test_sentence_a_alone_also_rewritten(self):
+        self.assertEqual(P.sanitize_text(self.A), self.A_REWORDED)
+
+    def test_idempotent(self):
+        once = P.sanitize_text(self.FILE_REFERENCE)
+        twice = P.sanitize_text(once)
+        self.assertEqual(twice, once)
+        self.assertEqual(once.count("paths that the user"), 1)
+
+    def test_case_insensitive(self):
+        out = P.sanitize_text(self.FILE_REFERENCE.lower())
+        self.assertIn("paths that the user", out.lower())
+        self.assertNotIn("paths the user", out.lower())
+
+    def test_unrelated_text_untouched(self):
+        for text in (
+            "Tokens prefixed with @ are paths the user explicitly referenced",
+            "Tokens prefixed with @ are paths the user explicitly mentioned.",
+            self.B,
+        ):
+            self.assertEqual(P.sanitize_text(text), text, text)
+
+    def test_wire_body_carries_the_rewrite(self):
+        body = P.build_upstream_body({
+            "model": "deepseek-v4.1-flash",
+            "messages": [{"role": "system", "content": self.FILE_REFERENCE},
+                         {"role": "user", "content": "hi"}]})
+        system = body["messages"][0]["content"]
+        self.assertIn("paths that the user explicitly referenced", system)
+        self.assertNotIn("paths the user explicitly referenced", system)
+
+
 class AssistantHistoryFingerprintTests(unittest.TestCase):
     """#574：assistant 历史里的身份句 / 品牌 + GUI 组合。
 
